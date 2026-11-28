@@ -17,53 +17,50 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.csu.studyflow.data.model.Chunk
 import cn.csu.studyflow.data.model.KnowledgePoint
 import cn.csu.studyflow.data.model.Scene
-import cn.csu.studyflow.ui.components.ConfidenceBadge
+import cn.csu.studyflow.data.model.chunksOf
 import cn.csu.studyflow.ui.components.SourceRefChip
 import cn.csu.studyflow.ui.components.TagChip
-import cn.csu.studyflow.ui.components.lowConfidenceModifier
 
 /**
  * ② 章节/知识点导航：课程—章节—知识点三级组织
- * 按 3.3 契约用知识点关联（前置关系箭头），不用文件夹树；
+ * 契约对齐：章节是知识点上的字符串字段（无独立表）；知识点卡片的摘要/
+ * 溯源/待确认都从 chunk 反查渲染（铁律②），不用文件夹树；
  * 平板（expanded）双栏：左章节列表 / 右知识点详情。
  */
 @Composable
 fun ChapterNavScreen(scene: Scene, wide: Boolean) {
-    val points = scene.points
-    var selectedChapterId by rememberSaveable { mutableStateOf(scene.chapters.firstOrNull()?.id ?: "") }
-
+    var selectedChapter by rememberSaveable { mutableStateOf(scene.chapterNames.firstOrNull() ?: "") }
     // 「可检查可修正」：已人工修正的知识点 id 集合（骨架阶段仅本页状态）
     val correctedIds = remember { mutableStateOf(setOf<String>()) }
 
     if (wide) {
         Row(Modifier.fillMaxWidth()) {
             ChapterList(
-                scene = scene,
-                selectedId = selectedChapterId,
-                onSelect = { selectedChapterId = it },
+                chapterNames = scene.chapterNames,
+                selected = selectedChapter,
+                onSelect = { selectedChapter = it },
                 modifier = Modifier.weight(1f),
             )
             VerticalDivider(Modifier.fillMaxHeight())
-            val chapter = scene.chapters.firstOrNull { it.id == selectedChapterId }
             PointDetailColumn(
-                chapterTitle = chapter?.title ?: "",
-                points = points.filter { it.chapterId == selectedChapterId },
+                chapterTitle = selectedChapter,
+                points = scene.points.filter { it.chapter == selectedChapter },
                 correctedIds = correctedIds.value,
-                onCorrect = { id ->
-                    correctedIds.value = correctedIds.value + id
-                },
+                onCorrect = { id -> correctedIds.value = correctedIds.value + id },
+                chunksOf = { scene.chunksOf(it) },
                 modifier = Modifier.weight(1.4f),
             )
         }
@@ -73,18 +70,19 @@ fun ChapterNavScreen(scene: Scene, wide: Boolean) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            scene.chapters.forEach { ch ->
-                item(key = "h-${ch.id}") {
+            scene.chapterNames.forEachIndexed { idx, ch ->
+                item(key = "h-$ch") {
                     Text(
-                        text = "第 ${ch.order} 章 · ${ch.title}",
+                        text = "第 ${idx + 1} 章 · $ch",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-                items(points.filter { it.chapterId == ch.id }, key = { it.id }) { p ->
+                items(scene.points.filter { it.chapter == ch }, key = { it.id }) { p ->
                     KnowledgePointCard(
                         point = p,
+                        chunks = scene.chunksOf(p.id),
                         corrected = p.id in correctedIds.value,
                         onCorrect = { correctedIds.value = correctedIds.value + p.id },
                     )
@@ -96,25 +94,25 @@ fun ChapterNavScreen(scene: Scene, wide: Boolean) {
 
 @Composable
 private fun ChapterList(
-    scene: Scene,
-    selectedId: String,
+    chapterNames: List<String>,
+    selected: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier = modifier, contentPadding = PaddingValues(8.dp)) {
-        items(scene.chapters, key = { it.id }) { ch ->
-            val selected = ch.id == selectedId
+        items(chapterNames, key = { it }) { ch ->
+            val isSel = ch == selected
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelect(ch.id) }
+                    .clickable { onSelect(ch) }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text(
-                    text = "第 ${ch.order} 章 · ${ch.title}",
+                    text = ch,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (selected) MaterialTheme.colorScheme.primary
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSel) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurface,
                 )
             }
@@ -128,6 +126,7 @@ private fun PointDetailColumn(
     points: List<KnowledgePoint>,
     correctedIds: Set<String>,
     onCorrect: (String) -> Unit,
+    chunksOf: (String) -> List<Chunk>,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -143,18 +142,21 @@ private fun PointDetailColumn(
             )
         }
         items(points, key = { it.id }) { p ->
-            KnowledgePointCard(p, p.id in correctedIds, onCorrect = { onCorrect(p.id) })
+            KnowledgePointCard(p, chunksOf(p.id), p.id in correctedIds, onCorrect = { onCorrect(p.id) })
         }
     }
 }
 
-/** 知识点卡片：六标签 + 溯源 + 前置关联 + 低置信标黄 */
+/** 知识点卡片：六标签 + chunk 反查（摘要/溯源/待确认）+ 前置关联 */
 @Composable
 private fun KnowledgePointCard(
     point: KnowledgePoint,
+    chunks: List<Chunk>,
     corrected: Boolean,
     onCorrect: () -> Unit,
 ) {
+    val lowChunks = chunks.filter { it.confidence < 0.8f }
+    val pages = chunks.mapNotNull { it.page }.distinct()
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
@@ -176,7 +178,7 @@ private fun KnowledgePointCard(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = point.summary,
+                text = chunks.firstOrNull()?.text ?: "（暂无关联资料块）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -185,26 +187,32 @@ private fun KnowledgePointCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TagChip("难度 ${"★".repeat(point.difficulty)}")
+                TagChip("难度 ${point.difficulty}")
                 TagChip("来源 ${point.source}")
                 TagChip("版本 ${point.version}")
             }
-            Spacer(Modifier.height(6.dp))
-            if (point.prerequisites.isNotEmpty()) {
+            if (point.prereq.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    point.prerequisites.forEach { pid ->
+                    point.prereq.split(",").filter { it.isNotBlank() }.forEach { pid ->
                         TagChip("← 前置 $pid")
                     }
                 }
-                Spacer(Modifier.height(6.dp))
             }
+            Spacer(Modifier.height(6.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SourceRefChip(point.sourceRef)
-                ConfidenceBadge(point.confidence, corrected)
-                if (!corrected && point.confidence < 0.8f) {
+                if (pages.isEmpty()) {
+                    TagChip("无溯源块")
+                } else {
+                    pages.forEach { page -> SourceRefChip("P.$page") }
+                }
+                if (corrected) {
+                    TagChip("已人工修正", Color(0xFFD7EFD7))
+                } else if (lowChunks.isNotEmpty()) {
+                    TagChip("${lowChunks.size} 块待确认", Color(0xFFFFF3CD))
                     Text(
                         text = "修正",
                         style = MaterialTheme.typography.labelSmall,
@@ -213,10 +221,10 @@ private fun KnowledgePointCard(
                     )
                 }
             }
-            if (point.relatedCourses.isNotEmpty()) {
+            if (point.relatedCourses.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    point.relatedCourses.forEach { course ->
+                    point.relatedCourses.split(",").filter { it.isNotBlank() }.forEach { course ->
                         TagChip("关联课程 $course", Color(0xFFE3E0F5))
                     }
                 }

@@ -54,8 +54,8 @@ fun ReviewScreen(scene: Scene, sub: String, onSubChange: (String) -> Unit) {
 /** 今日复习队列：按掌握度升序取错题与薄弱知识点 */
 @Composable
 private fun ReviewQueue(scene: Scene) {
-    val queue = scene.mistakes.filter { it.mastery < 0.7f }
-        .sortedBy { it.mastery }
+    val queue = scene.mistakes.filter { it.score < 0.7f }
+        .sortedBy { it.score }
     val started = remember { mutableStateOf(setOf<String>()) }
     val pointNames = scene.points.associate { it.id to it.name }
 
@@ -84,14 +84,15 @@ private fun ReviewQueue(scene: Scene) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Text(
-                        text = e.question,
+                        text = e.questionText,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TagChip("知识点 ${pointNames[e.pointId] ?: e.pointId}")
-                        TagChip("掌握度 ${(e.mastery * 100).toInt()}%")
+                        TagChip("知识点 ${pointNames[e.kpId] ?: e.kpId}")
+                        TagChip("掌握状态 ${e.masteryStatus}")
+                        TagChip("掌握度 ${(e.score * 100).toInt()}%")
                     }
                     Spacer(Modifier.height(8.dp))
                     Button(

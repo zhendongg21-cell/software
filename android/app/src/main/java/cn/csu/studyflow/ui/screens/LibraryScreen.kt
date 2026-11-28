@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
@@ -26,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cn.csu.studyflow.data.model.Scene
+import cn.csu.studyflow.data.model.chunksOfDoc
 import cn.csu.studyflow.ui.components.ConfidenceBadge
 import cn.csu.studyflow.ui.components.SourceRefChip
 import cn.csu.studyflow.ui.components.TagChip
@@ -54,6 +56,7 @@ fun LibraryScreen(scene: Scene, sub: String, onSubChange: (String) -> Unit) {
     }
 }
 
+/** 资料库：doc 卡片 + 其下 chunk 行（溯源/标黄/修正都在块级，按契约） */
 @Composable
 private fun MaterialList(scene: Scene) {
     val correctedIds = remember { mutableStateOf(setOf<String>()) }
@@ -61,39 +64,50 @@ private fun MaterialList(scene: Scene) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(scene.materials, key = { it.id }) { m ->
+        items(scene.documents, key = { it.id }) { doc ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = m.title,
+                            text = doc.title,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
-                        TagChip(m.type.label)
+                        TagChip(doc.type.label)
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        m.pointIds.forEach { pid -> TagChip("知识点 $pid") }
-                        TagChip("版本 ${m.version}")
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        SourceRefChip(m.sourceRef)
-                        ConfidenceBadge(m.confidence, m.id in correctedIds.value)
-                        if (m.id !in correctedIds.value && m.confidence < 0.8f) {
-                            Text(
-                                text = "修正",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.clickable {
-                                    correctedIds.value = correctedIds.value + m.id
-                                },
-                            )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "${doc.course} · ${doc.chapter}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val chunks = scene.chunksOfDoc(doc.id)
+                    if (chunks.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        HorizontalDivider()
+                        chunks.forEach { c ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TagChip("知识点 ${c.kpName ?: c.kpId ?: "未挂"}")
+                                if (c.page != null) SourceRefChip("P.${c.page}")
+                                ConfidenceBadge(c.confidence, c.id in correctedIds.value)
+                                if (c.id !in correctedIds.value && c.confidence < 0.8f) {
+                                    Text(
+                                        text = "修正",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable {
+                                            correctedIds.value = correctedIds.value + c.id
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -102,6 +116,7 @@ private fun MaterialList(scene: Scene) {
     }
 }
 
+/** 错题本：严格八字段展示（契约 3.3）+ 派生 score 进度条 */
 @Composable
 private fun MistakeList(scene: Scene) {
     val pointNames = scene.points.associate { it.id to it.name }
@@ -113,7 +128,7 @@ private fun MistakeList(scene: Scene) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Text(
-                        text = e.question,
+                        text = e.questionText,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -126,9 +141,14 @@ private fun MistakeList(scene: Scene) {
                     Spacer(Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TagChip("错因 · ${e.errorType}")
-                        TagChip("知识点 ${pointNames[e.pointId] ?: e.pointId}")
-                        TagChip("难度 ${"★".repeat(e.difficulty)}")
+                        TagChip("知识点 ${pointNames[e.kpId] ?: e.kpId}")
+                        TagChip("难度 ${e.difficulty}")
                         TagChip("复习 ${e.reviewCount} 次")
+                        when (e.masteryStatus) {
+                            "已掌握" -> TagChip(e.masteryStatus, Color(0xFFD7EFD7))
+                            "模糊" -> TagChip(e.masteryStatus, Color(0xFFFFF3CD))
+                            else -> TagChip(e.masteryStatus, Color(0xFFF7D8D8))
+                        }
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
@@ -139,12 +159,12 @@ private fun MistakeList(scene: Scene) {
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         LinearProgressIndicator(
-                            progress = { e.mastery },
+                            progress = { e.score },
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.padding(horizontal = 6.dp))
                         Text(
-                            text = "掌握度 ${(e.mastery * 100).toInt()}%",
+                            text = "掌握度 ${(e.score * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
