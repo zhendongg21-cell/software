@@ -15,6 +15,12 @@ var esc = function(s){ return String(s).replace(/[&<>"']/g, function(c){
 
 var CAP_LABEL = { audio:"录音", image:"拍照", hand:"手写" };
 var CAP_ENGINE = { audio:"ASR", image:"OCR", hand:"OCR(手写)" };
+/* 置信度阈值常量（A-W1-1b §五：W3 先别改数值，只抽常量；W4 由 A 标定）。
+   两处旧硬编码 0.8（L79/L162）统一走这里，避免改一处漏一处。*/
+var CONF = { threshold: 0.8, floor: 0.5 };
+function normConf(v){
+  return (typeof v === "number" && isFinite(v)) ? Math.max(0, Math.min(1, v)) : CONF.floor;
+}
 
 var state = {
   scene: "cs",
@@ -76,11 +82,11 @@ function renderStream(){
     return;
   }
   el.innerHTML = state.segments.map(function(s){
-    var low = s.confidence < 0.8;
+    var low = normConf(s.confidence) < CONF.threshold;
     return '<div class="seg">'
       + '<span class="seg-src">' + esc(CAP_LABEL[s.type]) + " · " + esc(s.source) + "</span>"
       + "<p>" + esc(s.text) + "</p>"
-      + '<span class="seg-conf">置信度 ' + s.confidence.toFixed(2)
+      + '<span class="seg-conf">置信度 ' + normConf(s.confidence).toFixed(2)
       + (low ? " · 建议人工核对" : "") + " · " + esc(CAP_ENGINE[s.type]) + "</span></div>";
   }).join("");
   el.scrollTop = el.scrollHeight;
@@ -113,9 +119,14 @@ function addCap(type){
     : engine.recognize(ref, sample.text, sample.confidence);
   return p.then(function(res){
     state.segments.push({ type: type, source: sample.source,
-      text: res.text, confidence: res.confidence });
+      text: res.text, confidence: normConf(res.confidence) });
     renderStream();
     log(CAP_ENGINE[type] + " → " + sample.source + "（" + res.engine + ", " + res.latencyMs + "ms）");
+    // 降级渲染：读 degraded 字段（A-W1-1b §三），真实实现失败时也给出可见提示，不静默
+    if(res && res.degraded){
+      log("⚠ 降级结果（" + (res.reason || "未知原因") + "）· 文本已标黄待人工核对");
+      toast("该能力降级返回，请用兜底文本并人工核对");
+    }
   });
 }
 /* ---------- 笔记页 ---------- */
@@ -159,7 +170,7 @@ function renderNote(){
     b.addEventListener("click", function(){ toast("已标记为核对通过"); log("用户确认该要点"); });
   });
 
-  var lows = state.segments.filter(function(s){ return s.confidence < 0.8; }).length;
+  var lows = state.segments.filter(function(s){ return normConf(s.confidence) < CONF.threshold; }).length;
   $("#feedback").innerHTML = "已整理 <b>" + n.segmentsLength + "</b> 段采集内容，生成 <b>"
     + n.sections.length + "</b> 组要点。其中 <b>" + lows + "</b> 段置信度偏低，已标黄建议人工核对。"
     + "<br>每点可点击直接修改，可展开「溯源」回到原始录音 / 图像位置。";
@@ -171,6 +182,7 @@ function structureNote(){
   log("MockLLM.structure · 片段数=" + state.segments.length);
   return MockLLM.structure(state.segments, scene().note).then(function(res){
     res.segmentsLength = state.segments.length;
+    if(res && res.degraded){ log("⚠ 结构化降级（" + (res.reason || "未知原因") + "）· 展示兜底结构"); }
     state.note = res;
     renderNote();
     btn.disabled = false; btn.textContent = "生成结构化笔记";
@@ -238,10 +250,18 @@ function doHandoff(){
   if(!state.task || state.handoffIndex >= 3 || state.busy) return;
   state.busy = true;
   return MockCrossDevice.handoff({ task: state.task.title, step: state.handoffIndex+1 }).then(function(res){
+    state.busy = false;
+    // F4 定案：必须读 ok；失败时不能报「已确认接力」（A-W1-1b 约定③）
+    if(!res || res.ok !== true){
+      log("✗ 接力失败（" + ((res && (res.reason || res.via)) || "无响应") + "）· 未推进步骤");
+      toast("接力未成功，请检查设备连接后重试（控制权留给人）");
+      renderHandoff();
+      return;
+    }
     state.handoffIndex++;
     renderHandoff();
-    state.busy = false;
     log("跨设备接力确认 · " + res.via + " · step " + state.handoffIndex);
+    if(res.degraded){ log("⚠ 接力降级（" + (res.reason || "未知原因") + "）"); }
     toast("已确认接力（用户显式确认，非自动同步）");
   });
 }

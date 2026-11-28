@@ -10,6 +10,11 @@
 function MockDelay(ms){
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
+/* 置信度归一化：必须是 0–1 的 number，非数值/非有限 → 0.5（落标黄区）。
+   契约见 A-W1-1b 约定②；app.js L83 直接 .toFixed(2)，不能给 null/字符串。*/
+function normalizeConf(v){
+  return (typeof v === "number" && isFinite(v)) ? Math.max(0, Math.min(1, v)) : 0.5;
+}
 
 /* 语音 → 文字
    TODO(A, W3): 按 Spike 结论接入端侧轻量 ASR 或云端 ASR。
@@ -17,8 +22,8 @@ function MockDelay(ms){
 var MockASR = {
   transcribe: function(audioRef, fallbackText, fallbackConf){
     return MockDelay(420).then(function(){
-      return { text: fallbackText, confidence: fallbackConf,
-               source: audioRef, engine: "mock-ondevice", latencyMs: 420 };
+      return { text: fallbackText, confidence: normalizeConf(fallbackConf),
+               source: audioRef, engine: "mock-ondevice", latencyMs: 420, degraded: false };
     });
   }
 };
@@ -29,8 +34,8 @@ var MockASR = {
 var MockOCR = {
   recognize: function(imageRef, fallbackText, fallbackConf){
     return MockDelay(360).then(function(){
-      return { text: fallbackText, confidence: fallbackConf,
-               source: imageRef, engine: "mock-ondevice", latencyMs: 360 };
+      return { text: fallbackText, confidence: normalizeConf(fallbackConf),
+               source: imageRef, engine: "mock-ondevice", latencyMs: 360, degraded: false };
     });
   }
 };
@@ -41,8 +46,10 @@ var MockOCR = {
 var MockLLM = {
   structure: function(segments, noteTemplate){
     return MockDelay(520).then(function(){
-      return { title: noteTemplate.title, sections: noteTemplate.sections,
-               segmentCount: segments.length, engine: "mock-llm" };
+      // 深拷贝：直接返回 noteTemplate.sections 的引用会让 UI 编辑污染 SCENES（A-W1-1b 隐患②）
+      return { title: noteTemplate.title,
+               sections: JSON.parse(JSON.stringify(noteTemplate.sections)),
+               segmentCount: segments.length, engine: "mock-llm", degraded: false };
     });
   }
 };
@@ -69,7 +76,7 @@ var MockCrossDevice = {
   handoff: function(taskState){
     return MockDelay(380).then(function(){
       return { ok:true, via:"OPPO 互联开放能力 / 超级碰一碰 (Mock)",
-               task: taskState, timestamp: Date.now() };
+               task: taskState, timestamp: Date.now(), degraded: false };
     });
   }
 };

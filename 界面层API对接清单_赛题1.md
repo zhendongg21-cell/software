@@ -24,16 +24,22 @@
 
 ## 2. 与 A（3.3）对齐的边界结论与待核对分歧点
 
-**边界结论**（与 A 3.3 ⑤ 口径一致）：W3 Spike 后由 A 扩 MockLLM（苏格拉底/出题/作业分级）并替换真实实现，B 界面不改。
+**边界结论（v1.1 已定案，2026-11-28 更新）**：`demo/js/adapters.js` 是唯一边界，**5 个方法的入参与返回形状不变**。
+> ⚠️ **前提修正**：原写「B 界面代码不用改」已被 A 修正为「**调用点签名不改，但 B 必须读 `degraded` 做降级渲染、`doHandoff` 加 `if(!res.ok)`**」（见 A-W1-1b v2.2 §一）。本清单已按修正后口径同步，F1–F4 全部闭合。
 
-**分歧点清单**（4.3 ⑤ 要求当天在群里对齐，周四 11-12 核对）：
+**分歧点清单（F1–F4 已全部定案，2026-11-28 与 A 书面对齐）**：
 
-| # | 分歧点 | B 的建议 | 待 A 确认 |
+| # | 分歧点 | 定案结论（A，2026-11-22） | 落地状态 |
 |---|---|---|---|
-| F1 | ASR/OCR 入参目前是字符串标签，真实实现需要音频/图片的实际引用 | W3 前把入参升级为对象 `{ ref, mime, meta }`，字符串可作 `meta` 兼容 | 是否 W3 Spike 一并定入参形状 v2 |
-| F2 | `LLM.structure` 真实实现由 AI 生成笔记，但 `sections[].src` 溯源字段必须保留 | 溯源字段进契约，不能省 | 大模型编排时每段带来源引用的成本 |
-| F3 | `RAG.search` 目前返回语料原数组，真实实现应带相关度分数 | 界面只用 `title/meta/hit/tag` 4 字段，**加字段不破坏界面**（如 `score`） | 返回形状 v2 是否加 `score` 与命中依据 |
-| F4 | `CrossDevice.handoff` 的 `taskState` 目前只有 `{task, step}` | W9 接 OPPO SDK 时需含设备信息/任务负载，届时升级入参 | W9 前与 OPPO 文档对齐 |
+| F1 | ASR/OCR 入参是字符串标签 vs 真实引用 | 入参形状**不变**；真实实现新增返回字段（`source/engine/latencyMs/degraded/reason`），UI 可不读；音频/图片引用 W3 前升级为 `{ref, mime, meta}` 对象，字符串作 meta 兼容 | 已定案，形状 v2 在 `A-W2-3`/`A-W2-4`；W3 Spike 落地 |
+| F2 | `LLM.structure` 溯源字段 `sections[].src` | 溯源字段**进契约、不可省**；真实 LLM 每段必须带来源引用 | 已定案，`A-W1-1b` 约定①；`segmentsLength` 由 `structureNote()` 注入，真实实现须保留 |
+| F3 | `RAG.search` 相关度分数 | 界面只用 `title/meta/hit/tag` 4 字段；后端已返回 `_score/_doc_id/_page/_ord`（下划线调试字段），**加字段不破坏界面** | 已实现（backend `/search`），前端渲染零改动 |
+| F4 | `CrossDevice.handoff` 的 `taskState` 入参 | 入参 `{task, step}` 不变；W9 接 OPPO SDK 时扩设备信息/负载；**关键是返回 `ok` 必须被读** | 已定案；`doHandoff()` 已加 `if(res.ok !== true)` 守卫；W9 前对齐 OPPO 文档 |
+
+**本轮已修复的代码隐患（对应 A-W1-1b 三个高危点）**：
+- `demo/js/app.js` `doHandoff()`：加 `if(res.ok !== true)` 守卫，失败不再误报「已确认接力」、busy 正确复位。
+- `demo/js/adapters.js` `MockLLM.structure`：`sections` 改为深拷贝（`JSON.parse(JSON.stringify(...))`），UI 编辑不再污染 `SCENES`。
+- 置信度阈值抽为 `CONF={threshold:0.8,floor:0.5}`，`confidence` 统一经 `normConf()` 归一化（非数值→0.5 落标黄区），消除两处硬编码 0.8；5 个 Mock 统一补 `degraded:false` 字段以便降级渲染。
 
 ## 3. 界面层将来要接的真实能力清单（按周次）
 
