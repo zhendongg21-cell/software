@@ -20,3 +20,6 @@ build/
 *.local
 
 # 说明：附件1-8（官方 PDF/DOCX/ZIP）与提取的 .txt 均属参赛交付物，保留纳入版本管理。
+
+# 后端本地数据库（运行时生成）
+backend/data/
